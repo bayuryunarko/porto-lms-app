@@ -1,0 +1,126 @@
+import os 
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import text 
+
+import models, schemas, crud, security
+from database import engine, get_db, SessionLocal 
+
+from typing import List
+
+# --- Sabuk Pengaman Database ---
+# Hanya eksekusi pembuatan tabel otomatis jika berada di lingkungan lokal
+if os.environ.get("ENVIRONMENT") == "development":
+    print("⚙️ Mode DEVELOPMENT: Membuat tabel database otomatis jika belum ada...", flush=True)
+    models.Base.metadata.create_all(bind=engine)
+else:
+    print("🛡️ Mode PRODUCTION: Eksekusi create_all dilewati untuk mencegah schema drift.", flush=True)
+
+app = FastAPI(title="LMS Auth Service", version="1.0.0")
+
+# ==========================================
+# BLOK CORS TELAH DIHAPUS DARI SINI
+# ==========================================
+
+@app.get("/")
+def health_check(db: Session = Depends(get_db)):
+    try:
+        # Melakukan ping ringan ke database
+        db.execute(text("SELECT 1"))
+        return {"status": "success", "service": "auth-service", "database": "connected"}
+    except Exception as e:
+        # Jika database terputus, lempar HTTP 500 agar GKE me-restart container
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+@app.post("/register", response_model=schemas.UserResponse)
+def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    # Cek apakah username sudah ada di database
+    db_user = crud.get_user_by_username(db, username=user.username)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username sudah terdaftar")
+    
+    # KEAMANAN EKSTRA: Paksa role menjadi 'siswa' jika mendaftar dari jalur publik
+    user.role = "siswa"
+    return crud.create_user(db=db, user=user)
+
+@app.post("/login", response_model=schemas.Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    # Cari user berdasarkan username
+    user = crud.get_user_by_username(db, username=form_data.username)
+    
+    # Validasi user ada ATAU password cocok dengan hash di database
+    if not user or not security.verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Username atau password salah",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Jika lolos, buatkan JWT (menitipkan identitas username dan role di dalam token)
+    access_token = security.create_access_token(
+        data={"sub": user.username, "role": user.role}
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# ==========================================
+# RUTE KHUSUS ADMIN
+# ==========================================
+
+@app.get("/users", response_model=List[schemas.UserResponse])
+def get_all_users_admin(
+    skip: int = 0, 
+    limit: int = 50, 
+    db: Session = Depends(get_db), 
+    admin_user: dict = Depends(security.require_admin)
+):
+    """Mengambil daftar pengguna dengan paginasi (Hanya Admin)"""
+    return crud.get_all_users(db, skip=skip, limit=limit)
+
+@app.post("/users", response_model=schemas.UserResponse)
+def create_user_admin(user: schemas.UserCreate, db: Session = Depends(get_db), admin_user: dict = Depends(security.require_admin)):
+    """Membuat pengguna baru dengan role bebas (Hanya Admin)"""
+    db_user = crud.get_user_by_username(db, username=user.username)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username sudah terdaftar")
+    return crud.create_user(db=db, user=user)
+
+
+@app.delete("/users/{user_id}")
+def delete_user_admin(user_id: int, db: Session = Depends(get_db), admin_user: dict = Depends(security.require_admin)):
+    """Menghapus pengguna berdasarkan ID (Hanya Admin)"""
+    user_to_delete = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user_to_delete:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan")
+    
+    # Keamanan ekstra: Cegah admin menghapus dirinya sendiri
+    if user_to_delete.username == admin_user.get("username"):
+        raise HTTPException(status_code=400, detail="Tidak dapat menghapus akun Anda sendiri yang sedang aktif")
+
+    crud.delete_user(db, user_id)
+    return {"status": "success", "message": f"User {user_to_delete.username} berhasil dihapus dari sistem"}
+
+@app.on_event("startup")
+def startup_event():
+    """Skrip ini hanya berjalan 1x setiap kali kontainer dinyalakan"""
+    admin_user = os.environ.get("FIRST_ADMIN_USER")
+    admin_pass = os.environ.get("FIRST_ADMIN_PASS")
+    
+    # Jika env variables untuk admin pertama tersedia
+    if admin_user and admin_pass:
+        db = SessionLocal() 
+        try:
+            existing_admin = crud.get_user_by_username(db, username=admin_user)
+            if not existing_admin:
+                print(f"⚙️ Membangun akun Admin pertama: {admin_user}...", flush=True)
+                new_admin = schemas.UserCreate(
+                    username=admin_user, 
+                    password=admin_pass, 
+                    role="admin"
+                )
+                crud.create_user(db, new_admin)
+                print("✅ Akun Admin berhasil dibuat!", flush=True)
+            else:
+                print(f"✅ Akun Admin '{admin_user}' sudah tersedia di sistem. Melewati proses bootstrap.", flush=True)
+        finally:
+            db.close()
