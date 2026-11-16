@@ -104,6 +104,10 @@ def delete_user_admin(user_id: int, db: Session = Depends(get_db), admin_user: d
 @app.on_event("startup")
 def startup_event():
     """Skrip ini hanya berjalan 1x setiap kali kontainer dinyalakan"""
+
+    # 1. TAMBAHKAN BARIS INI: Bangun semua tabel di database jika belum ada
+    models.Base.metadata.create_all(bind=engine)
+    
     admin_user = os.environ.get("FIRST_ADMIN_USER")
     admin_pass = os.environ.get("FIRST_ADMIN_PASS")
     
