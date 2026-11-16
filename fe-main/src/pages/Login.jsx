@@ -48,7 +48,7 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
-        <h2 className="text-2xl font-bold text-gray-800 text-center mb-6">LMS Portal</h2>
+        <h2 className="text-2xl font-bold text-gray-800 text-center mb-6">LMS Portal (E2E Test Success!)</h2>
         
         {error && (
           <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100">

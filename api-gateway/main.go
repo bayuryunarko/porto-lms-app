@@ -156,7 +156,7 @@ func main() {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "success",
-			"message": "API Gateway is running smoothly with CORS and Distributed Rate Limiting!",
+			"message": "API Gateway is running smoothly with CORS and Distributed Rate Limiting! (E2E Test Success!)",
 			"service": "api-gateway",
 		})
 	})
