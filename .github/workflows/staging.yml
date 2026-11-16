@@ -115,3 +115,74 @@ jobs:
           
           # Mendorong image ke GCP Artifact Registry
           docker push $IMAGE_URL:$IMAGE_TAG
+
+
+
+
+# ==============================================================================
+  # FASE 4: JEMBATAN GITOPS (SINKRONISASI REPOSITORI MANIFEST)
+  # ==============================================================================
+  update-manifest:
+    name: Update GitOps Manifest
+    # Wajib menunggu deteksi perubahan dan proses build selesai dengan sukses
+    needs: [detect-changes, build-and-push]
+    if: ${{ needs.detect-changes.outputs.services != '[]' && needs.detect-changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      # ==============================================================================
+      # STEP 4.1: CHECKOUT REPOSITORI MANIFEST GITOPS (Menggunakan PAT)
+      # ==============================================================================
+      - name: Checkout GitOps Manifest Repository
+        uses: actions/checkout@v4
+        with:
+          # Ganti dengan username GitHub Anda yang benar jika berbeda
+          repository: bayuryunarko/porto-lms-gitops-manifest
+          token: ${{ secrets.GITOPS_PAT }}
+          ref: main
+
+      # ==============================================================================
+      # STEP 4.2: INJEKSI TAG IMAGE DINAMIS DENGAN BASH & SED
+      # ==============================================================================
+      - name: Update Image Tags in Staging Manifests
+        run: |
+          # 1. Menarik daftar array JSON dari job deteksi (misal: ["auth-service", "api-gateway"])
+          # jq digunakan untuk memecah array tersebut menjadi list string biasa
+          SERVICES=$(echo '${{ needs.detect-changes.outputs.services }}' | jq -r '.[]')
+          
+          # 2. Menyiapkan variabel tag baru dan project ID
+          NEW_TAG="staging-${{ github.sha }}"
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          
+          echo "Memperbarui tag image di dalam folder /staging..."
+          
+          # 3. Melakukan iterasi/looping hanya pada layanan yang berubah
+          for SERVICE in $SERVICES; do
+            echo "-> Mengganti tag untuk $SERVICE menjadi $NEW_TAG"
+            
+            # Mencari semua file .yaml di folder staging/
+            # Menggunakan regex 'sed' untuk mencari baris image: yang sesuai dan mengganti tag-nya
+            find staging/ -name "*.yaml" -type f -exec sed -i "s|image: us-central1-docker.pkg.dev/.*/porto-lms-images/$SERVICE:.*|image: us-central1-docker.pkg.dev/$PROJECT_ID/porto-lms-images/$SERVICE:$NEW_TAG|g" {} +
+          done
+
+      # ==============================================================================
+      # STEP 4.3: COMMIT & PUSH OTOMATIS KE REPO GITOPS
+      # ==============================================================================
+      - name: Commit and Push Changes
+        run: |
+          # Mengatur identitas bot GitHub Actions
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Menandai seluruh perubahan di folder staging
+          git add staging/
+          
+          # Pengecekan keamanan: hanya lakukan commit jika memang ada teks yang berubah
+          if git diff --staged --quiet; then
+            echo "Tidak ada perubahan manifest yang perlu di-commit."
+          else
+            git commit -m "ci(staging): update image tags to $NEW_TAG [skip ci]"
+            # Push ke branch main dari repo manifest (Tanpa manual approval)
+            git push origin main
+            echo "✅ Pembaruan manifest berhasil di-push ke repositori GitOps!"
+          fi
