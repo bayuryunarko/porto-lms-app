@@ -68,7 +68,7 @@ function AssessmentHome() {
     setAnswers(prev => ({ ...prev, [questionId]: option }));
   };
 
-  // --- FUNGSI SUBMIT (Menunggu Hasil dari Backend) ---
+  // --- FUNGSI SUBMIT (Menunggu Hasil dari Backend) --
   const handleSubmit = async () => {
     const activeQuiz = quizSets[activeQuizIndex];
     const activeQuestions = activeQuiz.questions;

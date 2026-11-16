@@ -259,3 +259,6 @@ def sync_leaderboard(request: Request, db: Session = Depends(get_db), admin_user
             "gagal_dikirim": failed_count
         }
     }
+
+
+# test stg
