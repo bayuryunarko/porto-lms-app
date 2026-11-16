@@ -1,0 +1,49 @@
+name: CI Pipeline Staging
+
+# ==============================================================================
+# STEP 2.1: DEFINISI TRIGGER OTOMATIS
+# ==============================================================================
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  # ==============================================================================
+  # STEP 2.2: DETEKSI PERUBAHAN MONOREPO (PATH FILTERING)
+  # ==============================================================================
+  detect-changes:
+    name: Deteksi Perubahan Layanan
+    runs-on: ubuntu-latest
+
+    # Menangkap output dari Step 2.3 agar bisa dibaca oleh Job selanjutnya
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ==============================================================================
+      # STEP 2.3: PEMETAAN FOLDER KE DALAM ARRAY JSON
+      # ==============================================================================
+      - name: Path Filter Monorepo
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # Jika ada perubahan di dalam folder, masukkan nama kuncinya ke dalam array
+          filters: |
+            auth-service:
+              - 'auth-service/**'
+            content-service:
+              - 'content-service/**'
+            assessment-service:
+              - 'assessment-service/**'
+            leaderboard-service:
+              - 'leaderboard-service/**'
+            api-gateway:
+              - 'api-gateway/**'
+            fe-main:
+              - 'fe-main/**'
+            fe-assessment:
+              - 'fe-assessment/**'
