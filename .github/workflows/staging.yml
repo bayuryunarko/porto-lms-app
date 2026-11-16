@@ -47,3 +47,71 @@ jobs:
               - 'fe-main/**'
             fe-assessment:
               - 'fe-assessment/**'
+
+
+              
+
+# ==============================================================================
+  # FASE 3: PROSES BUILD & PUSH DOCKER (ARTIFACT REGISTRY)
+  # ==============================================================================
+  build-and-push:
+    name: Build & Push Image
+    needs: detect-changes
+    # Hanya berjalan JIKA ada perubahan di salah satu folder service
+    if: ${{ needs.detect-changes.outputs.services != '[]' && needs.detect-changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    
+    # Membuat mesin virtual paralel berdasarkan layanan yang berubah
+    strategy:
+      matrix:
+        service: ${{ fromJSON(needs.detect-changes.outputs.services) }}
+        
+    # WAJIB UNTUK WIF (OIDC): Memberikan izin GitHub Actions untuk meminta token eksternal
+    permissions:
+      contents: read
+      id-token: write
+      
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ==============================================================================
+      # STEP 3.1: OTENTIKASI KE GCP (KEYLESS AUTH)
+      # ==============================================================================
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_NAME }}
+          service_account: ${{ secrets.CI_SERVICE_ACCOUNT_EMAIL }}
+
+      # ==============================================================================
+      # STEP 3.2: SETUP KREDENSIAL DOCKER UNTUK ARTIFACT REGISTRY
+      # ==============================================================================
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: us-central1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      # ==============================================================================
+      # STEP 3.3 & 3.4: BUILD & PUSH IMAGE DENGAN TAG DINAMIS
+      # ==============================================================================
+      - name: Build and Push Docker Image
+        run: |
+          # Menyusun URL Artifact Registry secara dinamis
+          IMAGE_URL="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/porto-lms-images/${{ matrix.service }}"
+          
+          # Standarisasi Penamaan Tag Docker sesuai Blueprint GitOps
+          IMAGE_TAG="staging-${{ github.sha }}"
+          
+          echo "Memulai proses build untuk service: ${{ matrix.service }}"
+          cd ${{ matrix.service }}
+          
+          # Eksekusi Build Docker
+          docker build -t $IMAGE_URL:$IMAGE_TAG .
+          
+          # Mendorong image ke GCP Artifact Registry
+          docker push $IMAGE_URL:$IMAGE_TAG
