@@ -9,6 +9,10 @@ from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List
 
+from google.auth import default
+from google.auth.transport import requests as google_requests
+# from fastapi.responses import FileResponse, RedirectResponse
+
 import models, schemas, crud, security
 from database import engine, get_db
 from security import get_current_user
@@ -115,18 +119,33 @@ async def download_secure_file(
     if STORAGE_MODE == "gcs":
         from google.cloud import storage
         try:
-            storage_client = storage.Client()
+            # 1. Dapatkan kredensial ADC bawaan VM dan paksa refresh untuk mendapatkan token akses
+            credentials, project_id = default()
+            credentials.refresh(google_requests.Request())
+            
+            # 2. Ambil email SA dari environment variable GitOps
+            sa_email = os.environ.get("GCP_SA_EMAIL")
+            if not sa_email:
+                raise HTTPException(status_code=500, detail="GCP_SA_EMAIL belum dikonfigurasi di server")
+
+            storage_client = storage.Client(credentials=credentials)
             bucket = storage_client.bucket(GCP_BUCKET_NAME)
-            # Pastikan menggunakan safe_filename
             blob = bucket.blob(f"materi/{safe_filename}")
+            
             if not blob.exists():
                 raise HTTPException(status_code=404, detail="File PDF tidak ditemukan di Cloud")
                 
-            signed_url = blob.generate_signed_url(version="v4", expiration=timedelta(minutes=15), method="GET")
+            # 3. Delegasikan penandatanganan ke IAM API menggunakan sa_email dan access_token
+            signed_url = blob.generate_signed_url(
+                version="v4", 
+                expiration=timedelta(minutes=15), 
+                method="GET",
+                service_account_email=sa_email,
+                access_token=credentials.token
+            )
             return RedirectResponse(url=signed_url)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Gagal generate Signed URL: {str(e)}")
-            
+            raise HTTPException(status_code=500, detail=f"Gagal generate Signed URL via IAM: {str(e)}")
     else:
         # Gunakan os.path.join agar penyusunan direktori lebih aman sesuai OS (Linux/Windows)
         file_path = os.path.join(UPLOAD_DIR, safe_filename)
