@@ -5,7 +5,7 @@ import uuid
 from datetime import timedelta
 from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Form, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -87,7 +87,7 @@ def create_material_for_course(
                 blob = bucket.blob(f"materi/{unique_filename}")
                 blob.upload_from_file(file.file, content_type='application/pdf')
                 # Simpan ID cloud, bukan URL lokal
-                final_content = f"gs://{GCP_BUCKET_NAME}/materi/{unique_filename}"
+                final_content = f"/api/content/download/{unique_filename}"
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Gagal upload ke GCS: {str(e)}")
         else:
