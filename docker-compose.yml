@@ -77,6 +77,8 @@ services:
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES}
     depends_on:
       - auth-service
       - content-service

@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -124,11 +125,23 @@ func main() {
 	// --- PERBAIKAN: Percayai Reverse Proxy Internal ---
 	// Mendaftarkan rentang IP privat standar (Docker & Kubernetes/GKE)
 	// agar Gin mau membaca IP klien asli dari header X-Real-IP / X-Forwarded-For
-	err := r.SetTrustedProxies([]string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
-	if err != nil {
-		log.Printf("Gagal mengatur trusted proxies: %v", err)
+	// --- PERBAIKAN: Percayai Reverse Proxy dari Environment Variable ---
+	trustedProxiesEnv := getEnvOrDefault("TRUSTED_PROXIES", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
+	var trustedProxies []string
+
+	for _, ip := range strings.Split(trustedProxiesEnv, ",") {
+		trimmed := strings.TrimSpace(ip)
+		if trimmed != "" {
+			trustedProxies = append(trustedProxies, trimmed)
+		}
 	}
-	// --------------------------------------------------
+
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
+		log.Printf("Gagal mengatur trusted proxies: %v", err)
+	} else {
+		log.Printf("Trusted proxies aktif: %v", trustedProxies)
+	}
+	// -------------------------------------------------------------------
 
 	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
 		logFormat := map[string]interface{}{
